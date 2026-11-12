@@ -1,5 +1,5 @@
 /* ============================================================
-   古文古诗学习馆 —— 交互层
+   古文古诗学习馆 —— 交互层（书页版）
    ============================================================ */
 (function () {
   'use strict';
@@ -19,8 +19,6 @@
     for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
     return (h >>> 0).toString(36);
   }
-
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   function toast(msg) {
     const t = $('#toast');
@@ -43,7 +41,7 @@
       else if (kind === 'no') { o.type = 'triangle'; o.frequency.setValueAtTime(320, now); o.frequency.exponentialRampToValueAtTime(180, now + .18); }
       else { o.type = 'sine'; o.frequency.setValueAtTime(520, now); }
       g.gain.setValueAtTime(.0001, now);
-      g.gain.exponentialRampToValueAtTime(.08, now + .012);
+      g.gain.exponentialRampToValueAtTime(.07, now + .012);
       g.gain.exponentialRampToValueAtTime(.0001, now + .26);
       o.start(now); o.stop(now + .3);
     } catch (e) { /* 忽略 */ }
@@ -74,7 +72,8 @@
     wrong: [],
     stats: { correct: 0, wrong: 0, days: {}, streak: 0, lastDay: '' },
     settings: { sound: true, theme: 'light' },
-    visited: []
+    visited: [],
+    last: null
   });
   let S = blankState();
 
@@ -130,17 +129,38 @@
     return Math.min(100, base + Math.round(75 * (correct / answered)));
   }
 
-  /* ---------------- 路由 ---------------- */
-  const NAV = [
-    ['#/home', '学习地图'],
-    ['#/modules', '考点精讲'],
-    ['#/slash', '断句工坊'],
-    ['#/qa', '自测问答'],
-    ['#/cards', '词义闪卡'],
-    ['#/quiz', '随机闯关'],
-    ['#/poems', '古诗文诵读'],
-    ['#/recite', '背诵挑战'],
-    ['#/progress', '我的进度']
+  /* ---------------- 目录 / 路由 ---------------- */
+  const TOC = () => [
+    { label: '', items: [{ href: '#/home', label: '功课' }] },
+    {
+      label: '学习路径', items: [
+        { href: '#/path', label: '五步概览' },
+        ...D.modules.map((m) => ({ href: '#/module/' + m.id, label: m.title, no: m.num }))
+      ]
+    },
+    {
+      label: '练习', items: [
+        { href: '#/slash', label: '断句练习' },
+        { href: '#/qa', label: '自测问答' },
+        { href: '#/quiz', label: '随机练习' }
+      ]
+    },
+    {
+      label: '诗文', items: [
+        { href: '#/poems', label: '诵读' },
+        { href: '#/recite', label: '背诵' }
+      ]
+    },
+    { label: '复习', items: [{ href: '#/cards', label: '词义卡' }] },
+    { label: '', items: [{ href: '#/progress', label: '记录' }] }
+  ];
+
+  const PATH = [
+    { no: '一', name: '读', desc: '先解决停顿，把句子读顺。', ids: ['jiezou'] },
+    { no: '二', name: '解', desc: '让每个字都有确定的意思。', ids: ['shici', 'xuci'] },
+    { no: '三', name: '断', desc: '给长句断句，标出停顿处。', ids: ['duanju'] },
+    { no: '四', name: '译', desc: '把文言句译成现代汉语。', ids: ['fanyi'] },
+    { no: '五', name: '答', desc: '从原文找依据，写出答案。', ids: ['neirong', 'ganwu'] }
   ];
 
   let currentRoute = '';
@@ -153,11 +173,25 @@
     return { view: seg[0] };
   }
 
-  function setNav(view) {
-    $$('.nav a').forEach((a) => {
-      const target = a.getAttribute('href').replace('#/', '');
-      const base = target.split('/')[0];
-      a.classList.toggle('active', base === (view === 'module' ? 'modules' : view));
+  function routeKey(r) {
+    return r.view === 'module' ? 'module/' + r.id : r.view;
+  }
+
+  function renderTOC() {
+    $('#nav').innerHTML = TOC().map((g) => `
+      <div class="toc-group">
+        ${g.label ? `<div class="toc-label">${esc(g.label)}</div>` : ''}
+        ${g.items.map((it) => `
+          <a class="toc-item" href="${it.href}" data-route="${it.href.slice(2)}">
+            ${it.no ? `<span class="toc-no">${esc(it.no)}</span>` : ''}<span>${esc(it.label)}</span>
+          </a>`).join('')}
+      </div>`).join('');
+  }
+
+  function setNav(r) {
+    const key = routeKey(r);
+    $$('.toc-item').forEach((a) => {
+      a.classList.toggle('active', a.dataset.route === key);
     });
   }
 
@@ -169,16 +203,16 @@
       entries.forEach((e) => {
         if (!e.isIntersecting) return;
         const el = e.target;
-        const delay = Number(el.dataset.delay || 0);
-        setTimeout(() => el.classList.add('in'), delay);
+        setTimeout(() => el.classList.add('in'), Number(el.dataset.delay || 0));
         io.unobserve(el);
       });
     }, { threshold: .12, rootMargin: '0px 0px -8% 0px' });
+
     $$('.step, .poem-line', root).forEach((el, i) => {
-      el.dataset.delay = String(Math.min(i * 90, 700));
+      el.dataset.delay = String(Math.min(i * 80, 600));
       io.observe(el);
     });
-    // 兜底：把「本就在视口内却仍隐身」的元素显示出来，视口外的保留滚动揭示效果
+
     clearTimeout(observeReveal._t);
     observeReveal._t = setTimeout(() => {
       $$('.step, .poem-line', root).forEach((el) => {
@@ -188,203 +222,116 @@
     }, 1200);
   }
 
-  /* ---------------- 背景花瓣 ---------------- */
-  function initPetals() {
-    const c = $('#petals');
-    if (!c) return;
-    const ctx = c.getContext('2d');
-    let w, h, petals = [];
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const count = reduce ? 0 : 26;
-
-    function resize() {
-      w = c.width = window.innerWidth * devicePixelRatio;
-      h = c.height = window.innerHeight * devicePixelRatio;
-      c.style.width = window.innerWidth + 'px';
-      c.style.height = window.innerHeight + 'px';
-    }
-    function make() {
-      return {
-        x: Math.random() * w, y: Math.random() * h,
-        r: (3 + Math.random() * 7) * devicePixelRatio,
-        vy: (.15 + Math.random() * .5) * devicePixelRatio,
-        vx: (-.25 + Math.random() * .5) * devicePixelRatio,
-        a: Math.random() * Math.PI * 2,
-        va: (-.01 + Math.random() * .02),
-        o: .12 + Math.random() * .28,
-        hu: Math.random() < .5 ? 0 : 200
-      };
-    }
-    function draw() {
-      ctx.clearRect(0, 0, w, h);
-      const dark = document.documentElement.dataset.theme === 'dark';
-      petals.forEach((p) => {
-        p.x += p.vx; p.y += p.vy; p.a += p.va;
-        if (p.y > h + 20) { p.y = -20; p.x = Math.random() * w; }
-        if (p.x < -30) p.x = w + 20;
-        if (p.x > w + 30) p.x = -20;
-        ctx.save();
-        ctx.translate(p.x, p.y); ctx.rotate(p.a);
-        ctx.beginPath();
-        ctx.ellipse(0, 0, p.r, p.r * .55, 0, 0, Math.PI * 2);
-        ctx.fillStyle = p.hu === 0
-          ? `rgba(180,52,42,${p.o * (dark ? .8 : 1)})`
-          : `rgba(70,110,130,${p.o * (dark ? .8 : 1)})`;
-        ctx.fill();
-        ctx.restore();
-      });
-      requestAnimationFrame(draw);
-    }
-    resize();
-    petals = Array.from({ length: count }, make);
-    window.addEventListener('resize', resize);
-    if (count) draw();
+  /* ---------------- 片段 ---------------- */
+  function pageHead(title, sub) {
+    return `<div class="page-head"><h1>${esc(title)}</h1>${sub ? `<p>${esc(sub)}</p>` : ''}</div>`;
   }
 
-  /* ---------------- 彩带特效 ---------------- */
-  function burst(x, y) {
-    const c = $('#fx');
-    if (!c) return;
-    const ctx = c.getContext('2d');
-    c.width = window.innerWidth * devicePixelRatio;
-    c.height = window.innerHeight * devicePixelRatio;
-    c.style.width = window.innerWidth + 'px';
-    c.style.height = window.innerHeight + 'px';
-    const colors = ['#b4342a', '#9a6a1f', '#2f6f8f', '#3d6b4f', '#8c4a86'];
-    const ps = Array.from({ length: 46 }, () => {
-      const a = Math.random() * Math.PI * 2, sp = (2 + Math.random() * 6) * devicePixelRatio;
-      return {
-        x: x * devicePixelRatio, y: y * devicePixelRatio,
-        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 2 * devicePixelRatio,
-        life: 1, size: (2 + Math.random() * 4) * devicePixelRatio,
-        c: colors[(Math.random() * colors.length) | 0], rot: Math.random() * 6
-      };
-    });
-    let raf;
-    const t0 = performance.now();
-    (function loop(t) {
-      const dt = Math.min(32, t - t0) / 16;
-      ctx.clearRect(0, 0, c.width, c.height);
-      let alive = 0;
-      ps.forEach((p) => {
-        p.vy += .28 * devicePixelRatio; p.vx *= .99;
-        p.x += p.vx; p.y += p.vy; p.life -= .012; p.rot += .1;
-        if (p.life > 0) {
-          alive++;
-          ctx.save(); ctx.globalAlpha = Math.max(0, p.life);
-          ctx.translate(p.x, p.y); ctx.rotate(p.rot);
-          ctx.fillStyle = p.c; ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 1.6);
-          ctx.restore();
-        }
-      });
-      if (alive) raf = requestAnimationFrame(loop);
-      else { ctx.clearRect(0, 0, c.width, c.height); cancelAnimationFrame(raf); }
-    })(t0);
+  function section(title, body, note) {
+    return `<section class="sec">
+      <h2>${esc(title)}</h2>
+      ${note ? `<p class="sec-note">${esc(note)}</p>` : ''}
+      ${body}
+    </section>`;
   }
 
-  /* ---------------- 视图：首页 ---------------- */
+  function progressRow(label, pct, extra) {
+    return `<div class="meta-row"><span>${esc(label)}</span><span>${pct}%${extra ? ' · ' + esc(extra) : ''}</span></div>`;
+  }
+
+  /* ---------------- 视图：功课 ---------------- */
   function viewHome() {
     const totalAns = Object.values(S.module).reduce((a, m) => a + (m.correct || 0) + (m.wrong || 0) + (m.total || 0), 0);
     const dayIdx = Math.floor(Date.now() / 86400000) % D.poems.length;
     const daily = D.poems[dayIdx];
     const doneModules = D.modules.filter((m) => moduleScore(m.id) >= 100).length;
-    const now = new Date();
-    const hour = now.getHours();
-    const greet = hour < 6 ? '夜深了' : hour < 11 ? '早上好' : hour < 14 ? '午安' : hour < 19 ? '下午好' : '晚上好';
-    const qaAll = D.qa || [];
-    const qaGood = qaAll.filter((q) => S.qa && S.qa[q.id] && S.qa[q.id].grade >= 2).length;
+    const last = (S.last && S.last.hash && S.last.lang !== 'x')
+      ? S.last
+      : { hash: '#/path', label: '学习路径' };
 
     return `
     <div class="view">
-      <section class="hero">
-        <div class="hero-txt">
-          <h1><span class="grad">读古文，见天地</span><br>把高频考点，读成自己的底子</h1>
-          <p>${greet}。这里把「划分朗读节奏、实词、虚词、翻译、断句、内容理解、拓展运用」七大考点拆成可练、可背、可打卡的小关，配上古诗文诵读与闪卡，边看边记。</p>
-          <div class="hero-actions">
-            <a class="btn primary" href="#/modules">开始学习 →</a>
-            <a class="btn" href="#/quiz">随机闯关</a>
-            <a class="btn ghost" href="#/poems">古诗文诵读</a>
+      ${pageHead('今日功课', '接着上次的地方继续，或者从今日一诗读起。')}
+
+      <div class="list" style="margin-bottom:26px">
+        <a class="list-row" href="${esc(last.hash)}">
+          <span class="li-no">续</span>
+          <span class="li-main">
+            <span class="li-title">${esc(last.label)}</span>
+            <span class="li-desc">上次停在这里</span>
+          </span>
+          <span class="li-meta">继续 →</span>
+        </a>
+      </div>
+
+      <div class="kpi-row">
+        <div class="kpi"><b>${S.stats.streak || 0}</b><span>连续天数</span></div>
+        <div class="kpi"><b>${totalAns}</b><span>累计作答</span></div>
+        <div class="kpi"><b>${S.stats.correct || 0}</b><span>答对</span></div>
+        <div class="kpi"><b>${doneModules}/7</b><span>考点完成</span></div>
+      </div>
+
+      ${section('今日一诗', `
+        <div class="poem-sheet">
+          <div class="poem-title">
+            <h2>${esc(daily.title)}</h2>
+            <div>〔${esc(daily.dynasty)}〕${esc(daily.author)}</div>
           </div>
-        </div>
-        <div class="hero-visual">
-          <div class="hero-ring"></div>
-          <div class="hero-ring"></div>
-          <div class="hero-word">文</div>
-          <div class="hero-poem">腹有诗书气自华</div>
-        </div>
-      </section>
+          <div class="poem-body">${daily.lines.map((l) => `<span class="poem-line">${esc(l)}</span>`).join('')}</div>
+          <div class="poem-tools">
+            <button class="btn sm" data-act="speak" data-text="${esc(daily.lines.join(''))}">朗读</button>
+            <a class="btn sm" href="#/poems">全部诗文</a>
+          </div>
+        </div>`, '每天一首，先读顺，再看注释与译文。')}
 
-      <div class="stat-row">
-        <div class="stat"><div><b>${S.stats.streak || 0}</b><br><span>连续学习（天）</span></div></div>
-        <div class="stat"><div><b>${S.stats.correct || 0}</b><br><span>累计答对</span></div></div>
-        <div class="stat"><div><b>${totalAns}</b><br><span>累计作答</span></div></div>
-        <div class="stat"><div><b>${doneModules}/${D.modules.length}</b><br><span>已通关考点</span></div></div>
-        <div class="stat"><div><b>${qaGood}</b><br><span>自测已掌握</span></div></div>
-      </div>
-
-      <div class="section-head">
-        <h1>七大<em>高频考点</em></h1>
-        <p>点击卡片进入精讲：母题 → 思路 → 公式 → 口诀 → 必备知识 → 实战练习</p>
-      </div>
-      <div class="mod-grid">
-        ${D.modules.map((m, i) => {
-          const sc = moduleScore(m.id);
-          return `
-          <article class="mod-card tilt" data-href="#/module/${m.id}"
-            style="--accent:${m.color};--accent-soft:${m.color}22;animation:stepIn .6s ${i * 60}ms var(--ease) both">
-            <div class="num">${m.num}</div>
-            <span class="tag" style="color:${m.color}">${m.tag}</span>
-            <h3>${esc(m.title)}</h3>
-            <p>${esc(m.intro)}</p>
-            <div class="bar"><i data-w="${sc}"></i></div>
-            <div class="meta"><span>掌握度 ${sc}%</span><span>${m.practice.length} 道练习</span></div>
-          </article>`;
-        }).join('')}
-      </div>
-
-      <div class="sep"></div>
-
-      <div class="section-head">
-        <h1>今日<em>一诗</em></h1>
-        <p>一天一首，慢慢就有了语感</p>
-      </div>
-      <div class="poem-stage">
-        <div class="poem-title">
-          <h2>${esc(daily.title)}</h2>
-          <div>〔${esc(daily.dynasty)}〕${esc(daily.author)}</div>
-        </div>
-        <div class="poem-body">${daily.lines.map((l) => `<span class="poem-line">${esc(l)}</span>`).join('')}</div>
-        <div class="poem-tools">
-          <button class="btn sm" data-act="speak" data-text="${esc(daily.lines.join(''))}">🔊 朗读</button>
-          <a class="btn sm" href="#/poems">查看全部诗文</a>
-        </div>
-      </div>
+      ${section('从这里开始', `
+        <div class="tool-cards">
+          <a class="tool-card" href="#/slash">
+            <b>断句练习</b>
+            <span>长句 ${(D.longDrills || []).length} 道、短句 ${D.slashDrills.length} 道。点字间空隙标停顿。</span>
+          </a>
+          <a class="tool-card" href="#/qa">
+            <b>自测问答</b>
+            <span>${(D.qa || []).length} 道简答题。先自己写，再对照要点自评。</span>
+          </a>
+          <a class="tool-card" href="#/cards">
+            <b>词义卡</b>
+            <span>${D.cards.length} 张实词虚词卡，按遗忘曲线安排复习。</span>
+          </a>
+        </div>`)}
     </div>`;
   }
 
-  /* ---------------- 视图：考点列表 ---------------- */
-  function viewModules() {
+  /* ---------------- 视图：学习路径 ---------------- */
+  function viewPath() {
     return `
     <div class="view">
-      <div class="section-head">
-        <h1>考点<em>精讲</em></h1>
-        <p>先看「教材母题 → 答题思路」，再背「答题公式 + 速记口诀」，最后用练习检验</p>
+      ${pageHead('学习路径', '七个考点排成五步：读、解、断、译、答。点开任一考点看讲解与练习。')}
+
+      <div class="path-grid">
+        ${PATH.map((p) => `
+          <div class="path-step">
+            <div class="path-no">${p.no}</div>
+            <div class="path-name">${p.name}</div>
+            <div class="path-desc">${esc(p.desc)}</div>
+            <div class="path-mods">
+              ${p.ids.map((id) => {
+                const m = D.modules.find((x) => x.id === id);
+                if (!m) return '';
+                return `<a href="#/module/${m.id}"><span>${esc(m.title)}</span><span class="path-pct">${moduleScore(m.id)}%</span></a>`;
+              }).join('')}
+            </div>
+          </div>`).join('')}
       </div>
-      <div class="mod-grid">
-        ${D.modules.map((m, i) => {
-          const sc = moduleScore(m.id);
-          return `
-          <article class="mod-card tilt" data-href="#/module/${m.id}"
-            style="--accent:${m.color};--accent-soft:${m.color}22;animation:stepIn .6s ${i * 55}ms var(--ease) both">
-            <div class="num">${m.num}</div>
-            <span class="tag" style="color:${m.color}">${m.tag}</span>
-            <h3>${esc(m.title)}</h3>
-            <p>${esc(m.intro)}</p>
-            <div class="bar"><i data-w="${sc}"></i></div>
-            <div class="meta"><span>掌握度 ${sc}%</span><span>${m.practice.length} 道练习</span></div>
-          </article>`;
-        }).join('')}
-      </div>
+
+      <div class="rule"></div>
+
+      ${section('其余练习', `
+        <div class="tool-cards">
+          <a class="tool-card" href="#/slash"><b>断句练习</b><span>点字间空隙标停顿，检查多断与漏断。</span></a>
+          <a class="tool-card" href="#/qa"><b>自测问答</b><span>写答案，对照要点，自评三档。</span></a>
+          <a class="tool-card" href="#/quiz"><b>随机练习</b><span>从全部练习里随机抽十道。</span></a>
+        </div>`)}
     </div>`;
   }
 
@@ -403,128 +350,92 @@
 
     const know = m.knowledge;
     let knowHTML = '';
-    if (know.type === 'list') {
-      knowHTML = `<div class="klist">${know.items.map((it, i) => `
-        <div class="kitem ${i === 0 ? 'open' : ''}">
-          <div class="kitem-head"><span class="bullet"></span>${esc(it.k)}<span class="chev">▾</span></div>
-          <div class="kitem-body"><p>${esc(it.v)}</p></div>
-        </div>`).join('')}</div>`;
-    } else if (know.type === 'blocks') {
-      knowHTML = `<div class="klist">${know.items.map((it, i) => `
-        <div class="kitem ${i < 2 ? 'open' : ''}">
-          <div class="kitem-head"><span class="bullet"></span>${esc(it.k)}<span class="chev">▾</span></div>
-          <div class="kitem-body"><p>${esc(it.v)}</p></div>
+    if (know.type === 'list' || know.type === 'blocks') {
+      knowHTML = `<div class="acc">${know.items.map((it, i) => `
+        <div class="acc-item ${(know.type === 'blocks' ? i < 2 : i === 0) ? 'open' : ''}">
+          <div class="acc-head">${esc(it.k)}</div>
+          <div class="acc-body"><p>${esc(it.v)}</p></div>
         </div>`).join('')}</div>`;
     } else if (know.type === 'table') {
-      knowHTML = `<div class="tbl-wrap"><table class="k">
+      knowHTML = `<div class="tbl-wrap"><table class="t">
         <thead><tr>${know.head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
         <tbody>${know.rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody>
       </table></div>`;
     }
 
     const formulaHTML = m.formula.map((p, i) => `
-      <span class="part" data-i="${i}">${esc(p)}</span>
-      ${i < m.formula.length - 1 ? '<span class="op">+</span>' : ''}`).join('');
+      <span class="fpart" data-i="${i}">${esc(p)}</span>
+      ${i < m.formula.length - 1 ? '<span class="fop">＋</span>' : ''}`).join('');
 
     return `
-    <div class="view" style="--accent:${m.color}">
-      <div class="mod-head">
-        <div class="badge">${m.num}</div>
-        <div style="flex:1;min-width:220px">
-          <h1>${esc(m.title)}</h1>
-          <div class="sub">${esc(m.intro)}</div>
-        </div>
-        <div class="row">
-          ${prev ? `<a class="btn sm" href="#/module/${prev.id}">← ${esc(prev.title)}</a>` : ''}
-          ${next ? `<a class="btn sm" href="#/module/${next.id}">${esc(next.title)} →</a>` : ''}
-        </div>
-      </div>
+    <div class="view">
+      <div class="crumb"><a href="#/path">学习路径</a><span>/</span><span>${esc(m.title)}</span></div>
+      ${pageHead(m.title, m.intro)}
 
-      <div class="card">
-        <h3 style="margin:0 0 12px;font-family:var(--font-serif);letter-spacing:2px">📖 教材母题 <span class="muted" style="font-weight:400">· ${esc(m.source)}</span></h3>
-        <div class="stem">${esc(m.stem)}</div>
-        ${m.quote ? `<div class="quote-box">
-          <div class="q">${m.quoteMarked || esc(m.quote)}</div>
-          <div class="from">—— ${esc(m.source)}</div>
-        </div>` : ''}
+      ${m.stem || m.quote ? section('教材母题', `
+        ${m.stem ? `<div class="stem">${esc(m.stem)}</div>` : ''}
+        ${m.quote ? `<div class="quote">
+          <div class="q-text">${m.quoteMarked || esc(m.quote)}</div>
+          <div class="q-src">${esc(m.source)}</div>
+        </div>` : `<p class="note" style="margin-top:12px">出处：${esc(m.source)}</p>`}
+      `) : ''}
 
-        <h3 style="margin:22px 0 12px;font-family:var(--font-serif);letter-spacing:2px">🧭 答题思路</h3>
+      ${section('答题思路', `
         <div class="steps">
           ${m.steps.map((s, i) => `
             <div class="step">
-              <div class="dot">${i + 1}</div>
-              <h4><small>${esc(s.h)}</small>${esc(s.t)}</h4>
-              <p>${esc(s.d)}</p>
+              <div class="step-no">${i + 1}</div>
+              <h4 class="step-h"><small>${esc(s.h)}</small>${esc(s.t)}</h4>
+              <p class="step-p">${esc(s.d)}</p>
             </div>`).join('')}
         </div>
-
-        <div class="answer-box">
-          <h5>参考答案</h5>
+        <div class="answer">
+          <h4>参考答案</h4>
           <p>${esc(m.answer)}</p>
-        </div>
-      </div>
+        </div>`)}
 
-      <div class="card" style="margin-top:16px">
-        <h3 style="margin:0 0 14px;font-family:var(--font-serif);letter-spacing:2px">🧮 答题公式</h3>
+      ${section('答题公式与口诀', `
         <div class="formula" id="formula">${formulaHTML}</div>
-        <div class="muted" style="margin-bottom:16px">${esc(m.formulaText)}</div>
-
-        <h3 style="margin:6px 0 12px;font-family:var(--font-serif);letter-spacing:2px">🔑 速记口诀</h3>
-        <div class="mnemo" id="mnemo" title="点击翻转">
+        <p class="note">${esc(m.formulaText)}</p>
+        <div class="mnemo" id="mnemo" title="点击翻面">
           <div class="mnemo-inner">
             <div class="mnemo-face">
               <div>
-                <div class="code">${esc(m.mnemonic.code)}</div>
-                <div class="hintline">点击卡片，翻看拆解 ${esc(m.mnemonic.note)}</div>
+                <div class="mnemo-code">${esc(m.mnemonic.code)}</div>
+                <p class="note" style="margin:8px 0 0">点击翻看拆解 ${esc(m.mnemonic.note)}</p>
               </div>
             </div>
             <div class="mnemo-face mnemo-back">
               <div>
-                <div class="exp">${m.mnemonic.expand.map((e) => `<span>${esc(e)}</span>`).join('')}</div>
-                <div class="hintline" style="margin-top:10px">${esc(m.formulaText)}</div>
+                <div class="mnemo-exp">${m.mnemonic.expand.map((e) => `<span>${esc(e)}</span>`).join('')}</div>
+                <p class="note" style="margin:10px 0 0">${esc(m.formulaText)}</p>
               </div>
             </div>
           </div>
-        </div>
-      </div>
+        </div>`)}
 
-      ${asks.length ? `<div class="card" style="margin-top:16px">
-        <h3 style="margin:0 0 14px;font-family:var(--font-serif);letter-spacing:2px">❓ 常见设问 / 新型设问</h3>
-        ${asks.map(([k, arr]) => `
-          <div style="margin-bottom:14px">
-            <div class="tag" style="color:var(--accent)">${esc(k)}</div>
-            <ol style="margin:8px 0 0;padding-left:22px;color:var(--ink-2);font-size:14px;line-height:2">
-              ${arr.map((a) => `<li>${esc(a)}</li>`).join('')}
-            </ol>
-          </div>`).join('')}
-      </div>` : ''}
+      ${asks.length ? section('常见设问', asks.map(([k, arr]) => `
+        <div style="margin-bottom:14px">
+          <span class="tag">${esc(k)}</span>
+          <ol style="margin:8px 0 0;padding-left:22px;font-size:13.5px;line-height:1.9">
+            ${arr.map((a) => `<li>${esc(a)}</li>`).join('')}
+          </ol>
+        </div>`).join('')) : ''}
 
-      <div class="card" style="margin-top:16px">
-        <h3 style="margin:0 0 14px;font-family:var(--font-serif);letter-spacing:2px">📚 必备知识 · ${esc(m.knowledge.title)}</h3>
-        ${knowHTML}
-      </div>
+      ${section('必备知识', knowHTML, know.title)}
 
-      ${m.exam ? `<div class="card" style="margin-top:16px">
-        <h3 style="margin:0 0 14px;font-family:var(--font-serif);letter-spacing:2px">🧩 ${esc(m.exam.title)}</h3>
-        <div class="tbl-wrap"><table class="k">
+      ${m.exam ? section(m.exam.title, `<div class="tbl-wrap"><table class="t">
           <thead><tr>${m.exam.head.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>
           <tbody>${m.exam.rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</tbody>
-        </table></div>
-      </div>` : ''}
+        </table></div>`) : ''}
 
-      <div class="sep"></div>
-
-      <div class="section-head">
-        <h1>实战<em>练习</em></h1>
-        <p>答完立刻看解析 · 做题记录会进入「我的进度」错题本</p>
-      </div>
-      <div id="practice">
+      ${section('练习', `<div id="practice">
         ${m.practice.map((p, i) => questionHTML(p, 'p' + i, i + 1)).join('')}
-      </div>
+      </div>`, '做错的题会收进「记录」里的错题本。')}
 
-      <div class="row" style="justify-content:center;margin-top:24px">
-        <a class="btn" href="#/slash">去断句工坊练手</a>
-        <a class="btn primary" href="#/quiz">随机闯关测一测</a>
+      <div class="row" style="justify-content:space-between;margin-top:22px">
+        ${prev ? `<a class="btn sm" href="#/module/${prev.id}">← ${esc(prev.title)}</a>` : '<span></span>'}
+        ${next ? `<a class="btn sm" href="#/module/${next.id}">${esc(next.title)} →</a>` : '<span></span>'}
       </div>
     </div>`;
   }
@@ -533,36 +444,35 @@
   function questionHTML(item, key, no) {
     const id = item._id || key;
     if (item.type === 'choice') {
-      return `<div class="q-card" data-q="${esc(id)}" data-type="choice">
-        <div class="qno">第 ${no} 题</div>
-        <div class="qtext">${esc(item.q)}</div>
+      return `<div class="q" data-q="${esc(id)}" data-type="choice">
+        <div class="q-no">第 ${no} 题</div>
+        <div class="q-text">${esc(item.q)}</div>
         <div class="opts">
           ${item.opts.map((o, i) => `<div class="opt" data-i="${i}">
-            <span class="key">${'ABCD'[i] || i + 1}</span><span>${esc(o)}</span></div>`).join('')}
+            <span class="opt-key">${'ABCD'[i] || i + 1}</span><span>${esc(o)}</span></div>`).join('')}
         </div>
         <div class="fb"></div>
       </div>`;
     }
     if (item.type === 'blank') {
-      return `<div class="q-card" data-q="${esc(id)}" data-type="blank">
-        <div class="qno">第 ${no} 题</div>
-        <div class="qtext">${esc(item.q)}</div>
+      return `<div class="q" data-q="${esc(id)}" data-type="blank">
+        <div class="q-no">第 ${no} 题</div>
+        <div class="q-text">${esc(item.q)}</div>
         <div class="row" style="margin-bottom:12px">
-          ${item.words.map((w, i) => `<label class="row" style="gap:6px;font-size:14px">
-            <span style="font-family:var(--font-serif);color:var(--accent)">${esc(w)}</span>
-            <input class="blank-input" data-i="${i}" placeholder="释义" style="width:130px;padding:7px 10px;border-radius:9px;border:1px solid var(--line);background:var(--paper);color:var(--ink);font-size:13.5px;outline:none">
+          ${item.words.map((w, i) => `<label class="row" style="gap:6px;font-size:13.5px">
+            <span style="color:var(--zhu)">${esc(w)}</span>
+            <input class="blank-input" data-i="${i}" placeholder="释义">
           </label>`).join('')}
           <button class="btn sm primary" data-act="check-blank">对答案</button>
         </div>
         <div class="fb"></div>
       </div>`;
     }
-    // slash
-    return `<div class="q-card" data-q="${esc(id)}" data-type="slash">
-      <div class="qno">第 ${no} 题 · ${esc(item.mode || '断句')}</div>
-      <div class="qtext">${esc(item.q)}</div>
+    return `<div class="q" data-q="${esc(id)}" data-type="slash">
+      <div class="q-no">第 ${no} 题 · ${esc(item.mode || '断句')}</div>
+      <div class="q-text">${esc(item.q)}</div>
       ${slashStageHTML(item, Array.from(item.plain).length > 26)}
-      <div class="drill-bar">
+      <div class="toolbar" style="margin:14px 0 0">
         <button class="btn sm primary" data-act="check-slash">检查断句</button>
         <button class="btn sm" data-act="clear-slash">清空</button>
         <button class="btn sm ghost" data-act="hint-slash">提示</button>
@@ -574,10 +484,10 @@
   const PUNCT = /[，。！？；：、）」』”’,.!?;:]/;
   function slashStageHTML(item, long) {
     const chars = Array.from(item.plain);
-    let html = '<div class="slash-stage' + (long ? ' long' : '') + '">';
+    let html = '<div class="stage' + (long ? ' long' : '') + '">';
     chars.forEach((c, i) => {
       if (i > 0 && !PUNCT.test(c)) {
-        html += `<span class="gap" data-g="${i}"><span class="s">／</span></span>`;
+        html += `<span class="gap${long ? ' long-gap' : ''}" data-g="${i}"><span class="s">／</span></span>`;
       }
       html += `<span class="ch">${esc(c)}</span>`;
     });
@@ -592,16 +502,14 @@
     for (const c of Array.from(marked)) {
       if (c === '/') {
         let g = pi;
-        while (g < P.length && PUNCT.test(P[g])) g++; // 标点后的停顿归到下一个字之前
+        while (g < P.length && PUNCT.test(P[g])) g++;
         if (g > 0 && g < P.length) gaps.push(g);
         continue;
       }
       if (P[pi] === c) { pi++; continue; }
-      // 标注里省略了原文的标点：跳过这些标点再匹配
       let k = pi;
       while (k < P.length && PUNCT.test(P[k]) && P[k] !== c) k++;
-      if (k < P.length && P[k] === c) { pi = k + 1; continue; }
-      // 标注里的标点在原文中没有，忽略即可
+      if (k < P.length && P[k] === c) { pi = k + 1; }
     }
     return Array.from(new Set(gaps));
   }
@@ -612,7 +520,7 @@
     const qid = card.dataset.q;
 
     if (type === 'choice') {
-      const q = findQuestion(qid, card);
+      const q = findQuestion(qid);
       $$('.opt', card).forEach((opt) => {
         opt.addEventListener('click', () => {
           if (card.dataset.done) return;
@@ -622,14 +530,13 @@
           if (ok) {
             opt.classList.add('right');
             fb.className = 'fb show ok';
-            fb.textContent = '✓ 回答正确！' + (q.exp ? '　' + q.exp : '');
+            fb.textContent = '答对了。' + (q.exp ? ' ' + q.exp : '');
             beep('ok');
-            burst(opt.getBoundingClientRect().right - 20, opt.getBoundingClientRect().top + 14);
           } else {
             opt.classList.add('wrong');
             $$('.opt', card)[q.ans].classList.add('right');
             fb.className = 'fb show no';
-            fb.textContent = '✗ 再想一想。正确答案是 ' + ('ABCD'[q.ans]) + '。' + (q.exp || '');
+            fb.textContent = '不对。正确答案是 ' + ('ABCD'[q.ans]) + '。' + (q.exp || '');
             beep('no');
           }
           card.dataset.done = '1';
@@ -640,19 +547,19 @@
     }
 
     if (type === 'blank') {
-      const q = findQuestion(qid, card);
+      const q = findQuestion(qid);
       $('[data-act="check-blank"]', card).addEventListener('click', () => {
         if (card.dataset.done) return;
         const inputs = $$('.blank-input', card);
         let allOk = true;
         inputs.forEach((inp, i) => {
           const ok = answerMatches(inp.value, q.ans[i]);
-          inp.style.borderColor = ok ? 'var(--green)' : 'var(--red)';
-          inp.style.background = ok ? 'color-mix(in srgb, var(--green) 10%, var(--paper))' : 'var(--red-soft)';
+          inp.style.borderColor = ok ? 'var(--green)' : 'var(--zhu)';
+          inp.style.background = ok ? 'color-mix(in srgb, var(--green) 7%, var(--paper-2))' : 'color-mix(in srgb, var(--zhu) 6%, var(--paper-2))';
           if (!ok) allOk = false;
         });
         fb.className = 'fb show ' + (allOk ? 'ok' : 'no');
-        fb.innerHTML = (allOk ? '✓ 全对！' : '✗ 参考释义：' + q.ans.map((a) => '「' + esc(a) + '」').join('、')) +
+        fb.innerHTML = (allOk ? '全对。' : '参考释义：' + q.ans.map((a) => '「' + esc(a) + '」').join('、')) +
           (q.exp ? '<br>' + esc(q.exp) : '');
         card.dataset.done = '1';
         card.dataset.correct = allOk ? '1' : '0';
@@ -665,9 +572,9 @@
     }
 
     if (type === 'slash') {
-      const q = findQuestion(qid, card);
+      const q = findQuestion(qid);
       const ans = gapsFromMarked(q.marked, q.plain);
-      const stage = $('.slash-stage', card);
+      const stage = $('.stage', card);
       const chosen = new Set();
       $$('.gap', stage).forEach((g) => {
         g.addEventListener('click', (e) => {
@@ -680,8 +587,7 @@
       });
       $('[data-act="check-slash"]', card).addEventListener('click', () => {
         if (card.dataset.done) return;
-        let ok = true;
-        let extra = 0, missing = 0;
+        let ok = true, extra = 0, missing = 0;
         $$('.gap', stage).forEach((g) => {
           const i = Number(g.dataset.g);
           const isAns = ans.includes(i);
@@ -691,12 +597,11 @@
         });
         if (ok) {
           fb.className = 'fb show ok';
-          fb.textContent = '✓ 断句正确！' + (q.limit ? `（正好 ${q.limit} 处）` : '') + (q.hint ? '　' + q.hint : '');
+          fb.textContent = '断句正确。' + (q.limit ? `共 ${q.limit} 处。` : '') + (q.hint ? ' ' + q.hint : '');
           beep('ok');
-          burst(stage.getBoundingClientRect().left + stage.offsetWidth / 2, stage.getBoundingClientRect().top + 30);
         } else {
           fb.className = 'fb show no';
-          fb.textContent = `✗ 多断 ${extra} 处，漏断 ${missing} 处。红色斜线是多断的地方，金色闪烁处是漏掉的停顿。` + (q.hint ? '提示：' + q.hint : '');
+          fb.textContent = `多断 ${extra} 处，漏断 ${missing} 处。红色斜线是多断的地方，金色闪烁处是漏掉的停顿。` + (q.hint ? '提示：' + q.hint : '');
           beep('no');
         }
         card.dataset.done = '1';
@@ -709,7 +614,7 @@
         $$('.gap', stage).forEach((g) => g.classList.remove('on'));
       });
       $('[data-act="hint-slash"]', card).addEventListener('click', () => {
-        if (q.hint) { fb.className = 'fb show'; fb.textContent = '💡 ' + q.hint; }
+        if (q.hint) { fb.className = 'fb show'; fb.textContent = '提示：' + q.hint; }
       });
     }
   }
@@ -723,12 +628,10 @@
     return toks.some((t) => t === b);
   }
 
-  /* 题库索引（用于从 DOM 找回题目数据） */
   const questionRegistry = new Map();
   function registerQuestion(item) {
-    const id = item._id;
-    questionRegistry.set(id, item);
-    return id;
+    questionRegistry.set(item._id, item);
+    return item._id;
   }
   function findQuestion(id) { return questionRegistry.get(id) || {}; }
 
@@ -752,7 +655,7 @@
   function bindPractice(moduleId) {
     const m = D.modules.find((x) => x.id === moduleId);
     if (!m) return;
-    $$('#practice .q-card').forEach((card, i) => {
+    $$('#practice .q').forEach((card, i) => {
       const item = m.practice[i];
       if (!item) return;
       item._id = moduleId + '-' + i;
@@ -763,8 +666,8 @@
     });
   }
 
-  /* ---------------- 视图：断句工坊 ---------------- */
-  let drillMode = 'long'; // 'long' | 'short'
+  /* ---------------- 视图：断句练习 ---------------- */
+  let drillMode = 'long';
   let drillOrder = [];
   let drillIdx = 0;
 
@@ -778,37 +681,32 @@
 
   function viewSlash() {
     if (!drillOrder.length) resetDrillOrder();
-    const pool = drillPool();
-    const total = drillOrder.length;
     const nLong = (D.longDrills || []).length;
     const nShort = D.slashDrills.length;
     return `
     <div class="view">
-      <div class="section-head">
-        <h1>断句<em>工坊</em></h1>
-        <p>中考题型：给一个长句，按「限断 × 处」把它断成几个短句。在字与字之间点一下即出现「／」，断完点「检查断句」。</p>
+      ${pageHead('断句练习', '在字与字之间点一下标出停顿，断完点「检查断句」。红色是多断，金色闪烁是漏断。')}
+
+      <div class="toolbar">
+        <button class="btn sm ${drillMode === 'long' ? 'primary' : 'ghost'}" data-act="mode-long">长句 · 限断（${nLong}）</button>
+        <button class="btn sm ${drillMode === 'short' ? 'primary' : 'ghost'}" data-act="mode-short">短句（${nShort}）</button>
       </div>
 
-      <div class="row" style="margin-bottom:16px">
-        <button class="btn sm ${drillMode === 'long' ? 'primary' : 'ghost'}" data-act="mode-long">长句断句 · 限断（${nLong} 题）</button>
-        <button class="btn sm ${drillMode === 'short' ? 'primary' : 'ghost'}" data-act="mode-short">基础短句（${nShort} 题）</button>
+      <div class="row" style="justify-content:space-between;margin-bottom:10px">
+        <div class="muted" id="drill-count"></div>
+        <div class="row">
+          <button class="btn sm" data-act="shuffle">打乱</button>
+          <button class="btn sm" data-act="next-drill">下一题 →</button>
+        </div>
       </div>
 
-      <div class="card">
-        <div class="row" style="justify-content:space-between;margin-bottom:6px">
-          <div class="counter" id="drill-count"></div>
-          <div class="row">
-            <button class="btn sm" data-act="shuffle">🔀 打乱</button>
-            <button class="btn sm" data-act="next-drill">下一题 →</button>
-          </div>
-        </div>
-        <div id="drill-box"></div>
-        <div class="drill-bar" style="margin-top:14px">
-          <button class="btn sm" data-act="speak-drill">🔊 按节奏朗读</button>
-          <span class="muted">${drillMode === 'long'
-          ? '提示：先通读全句理解句意，再抓「曰、也、矣、哉、乎、者」等标志词；注意「限断」「/ 处」的限制。'
-          : '提示：短句多考单层结构，看主谓、转折、对称即可。'}</span>
-        </div>
+      <div id="drill-box"></div>
+
+      <div class="row" style="margin-top:14px">
+        <button class="btn sm" data-act="speak-drill">按节奏朗读</button>
+        <span class="muted">${drillMode === 'long'
+        ? '先读通句意，再找「曰、也、矣、哉、乎、者」这类标志词。'
+        : '短句多考单层结构，看主谓、转折、对称即可。'}</span>
       </div>
     </div>`;
   }
@@ -823,18 +721,17 @@
     const item = Object.assign({}, raw, {
       _id: 'drill-' + drillIdx + '-' + drillMode,
       type: 'slash',
-      mode: isLong ? '断句' : (raw.mode || '断句'),
-      title: raw.source || ''
+      mode: isLong ? '断句' : (raw.mode || '断句')
     });
     registerQuestion(item);
-    box.innerHTML = `<div class="q-card" data-q="${item._id}" data-type="slash" data-module="" style="border:0;padding:0;background:transparent;margin:0">
-      <div class="qno">${isLong ? '长句断句' : esc(item.mode)} · 点击字与字之间的空隙即可断句</div>
+    box.innerHTML = `<div class="q" data-q="${item._id}" data-type="slash" data-module="" style="border-top:0;padding:14px 0 0">
+      <div class="q-no">${isLong ? '长句断句' : esc(item.mode)}</div>
       ${isLong ? `<div class="drill-meta">
         <span class="tag">${esc(raw.source || '')}</span>
-        <span><b>限断 ${raw.limit} 处</b> · 共 ${Array.from(raw.plain).length} 字</span>
+        <span>限断 <b>${raw.limit}</b> 处 · 共 ${Array.from(raw.plain).length} 字</span>
       </div>` : ''}
       ${slashStageHTML(item, isLong)}
-      <div class="drill-bar" style="margin-top:18px">
+      <div class="toolbar" style="margin:14px 0 0">
         <button class="btn sm primary" data-act="check-slash">检查断句</button>
         <button class="btn sm" data-act="clear-slash">清空</button>
         <button class="btn sm ghost" data-act="hint-slash">提示</button>
@@ -843,10 +740,9 @@
       ${isLong && raw.trans ? `<div class="drill-trans" id="drill-trans" hidden>${esc(raw.trans)}</div>` : ''}
       <div class="fb"></div>
     </div>`;
-    const card = $('.q-card', box);
-    card.dataset.trans = raw.trans || '';
+    const card = $('.q', box);
     bindQuestion(card);
-    $('#drill-count').textContent = `第 ${(drillIdx % drillOrder.length) + 1} / ${drillOrder.length} 题 · ${isLong ? '长句断句题库' : '基础短句题库'}`;
+    $('#drill-count').textContent = `第 ${(drillIdx % drillOrder.length) + 1} / ${drillOrder.length} 题 · ${isLong ? '长句' : '短句'}`;
     markStudy();
   }
 
@@ -868,50 +764,43 @@
       return true;
     });
 
-    const badge = (r) => {
-      if (!r) return '<span class="qa-badge">未自测</span>';
-      if (r.grade >= 2) return '<span class="qa-badge ok">已掌握</span>';
-      if (r.grade === 1) return '<span class="qa-badge mid">部分掌握</span>';
-      return '<span class="qa-badge no">待巩固</span>';
-    };
-
     return `
     <div class="view">
-      <div class="section-head">
-        <h1>自测<em>问答</em></h1>
-        <p>先自己动笔写答案，再点「对照参考答案」核对要点，最后给自己评个等级——全对、答到一半、还是没答上。</p>
+      ${pageHead('自测问答', '先自己写答案，再对照参考答案要点，最后评一档：完全答对、答到一半、没答上。')}
+
+      <div class="kpi-row">
+        <div class="kpi"><b>${list.length}</b><span>题目</span></div>
+        <div class="kpi"><b>${doneN}</b><span>已自测</span></div>
+        <div class="kpi"><b>${goodN}</b><span>已掌握</span></div>
       </div>
 
-      <div class="stat-row">
-        <div class="stat"><div><b>${list.length}</b><br><span>题目总数</span></div></div>
-        <div class="stat"><div><b>${doneN}</b><br><span>已自测</span></div></div>
-        <div class="stat"><div><b>${goodN}</b><br><span>已掌握</span></div></div>
-        <div class="stat"><div><b>${Math.round((goodN / Math.max(1, list.length)) * 100)}%</b><br><span>掌握率</span></div></div>
-      </div>
-
-      <div class="row" style="margin-bottom:18px">
-        ${[['all', '全部'], ['todo', '还没做'], ['done', '做过的'], ['hard', '待巩固']].map(([k, t]) => `
+      <div class="toolbar">
+        ${[['all', '全部'], ['todo', '未做'], ['done', '做过'], ['hard', '待巩固']].map(([k, t]) => `
           <button class="btn sm ${qaFilter === k ? 'primary' : 'ghost'}" data-act="qa-filter" data-f="${k}">${t}</button>`).join('')}
-        <button class="btn sm" data-act="qa-random" style="margin-left:auto">🎲 随机抽一题</button>
+        <button class="btn sm" data-act="qa-random" style="margin-left:auto">随机抽一题</button>
       </div>
 
       <div class="qa-list" id="qa-list">
-        ${shown.length ? shown.map((q, i) => qaCard(q, list.indexOf(q) + 1)).join('') : '<div class="card center muted">这个分类下暂时没有题目。</div>'}
+        ${shown.length ? shown.map((q) => qaCard(q, list.indexOf(q) + 1)).join('') : '<p class="muted" style="padding:16px 0">这个分类下暂时没有题目。</p>'}
       </div>
     </div>`;
   }
 
   function qaCard(q, no) {
     const r = qaRec(q.id);
+    const badge = !r ? '<span class="badge">未自测</span>'
+      : r.grade >= 2 ? '<span class="badge ok">已掌握</span>'
+        : r.grade === 1 ? '<span class="badge mid">部分掌握</span>'
+          : '<span class="badge no">待巩固</span>';
     return `
-    <div class="card qa-card" id="qa-${q.id}" data-qa="${q.id}">
+    <div class="qa-item" id="qa-${q.id}" data-qa="${q.id}">
       <div class="qa-top">
-        <span class="tag" style="color:var(--accent)">${esc(q.tag)}</span>
+        <span class="tag">${esc(q.tag)}</span>
         <span class="qa-no">Q${no}</span>
-        <span style="margin-left:auto">${r ? (r.grade >= 2 ? '<span class="qa-badge ok">已掌握</span>' : r.grade === 1 ? '<span class="qa-badge mid">部分掌握</span>' : '<span class="qa-badge no">待巩固</span>') : '<span class="qa-badge">未自测</span>'}</span>
+        <span style="margin-left:auto">${badge}</span>
       </div>
       <div class="qa-q">${esc(q.q)}</div>
-      <textarea class="qa-input" rows="3" placeholder="在这里写下你的答案（写不出来也没关系，先想想关键词）…">${esc(r && r.text ? r.text : '')}</textarea>
+      <textarea class="qa-input" rows="3" placeholder="先写下你的答案，再对照要点。">${esc(r && r.text ? r.text : '')}</textarea>
       <div class="row" style="margin-top:10px">
         <button class="btn sm primary" data-act="qa-reveal" data-id="${q.id}">对照参考答案</button>
         <button class="btn sm ghost" data-act="qa-clear" data-id="${q.id}">清空作答</button>
@@ -920,7 +809,7 @@
         <div class="ref-title">参考答案（要点）</div>
         <ol>${q.ref.map((p) => `<li>${esc(p)}</li>`).join('')}</ol>
         <div class="grade-row">
-          <span class="muted">自评：</span>
+          <span class="muted">自评</span>
           <button class="btn sm ${r && r.grade === 2 ? 'primary' : ''}" data-act="qa-grade" data-id="${q.id}" data-g="2">完全答对</button>
           <button class="btn sm ${r && r.grade === 1 ? 'primary' : ''}" data-act="qa-grade" data-id="${q.id}" data-g="1">答到一半</button>
           <button class="btn sm ${r && r.grade === 0 ? 'primary' : ''}" data-act="qa-grade" data-id="${q.id}" data-g="0">没答上</button>
@@ -934,7 +823,6 @@
     if (!card) return;
     const box = document.getElementById('ref-' + id);
     box.hidden = false;
-    box.classList.add('show');
     const txt = $('.qa-input', card).value.trim();
     const rec = (S.qa && S.qa[id]) || {};
     rec.shown = true;
@@ -962,22 +850,18 @@
     save();
     markStudy();
     if (card) {
-      const holder = card.querySelector('.qa-top');
-      const last = holder.lastElementChild;
-      last.innerHTML = g >= 2 ? '<span class="qa-badge ok">已掌握</span>' : g === 1 ? '<span class="qa-badge mid">部分掌握</span>' : '<span class="qa-badge no">待巩固</span>';
+      const last = card.querySelector('.qa-top').lastElementChild;
+      last.innerHTML = g >= 2 ? '<span class="badge ok">已掌握</span>' : g === 1 ? '<span class="badge mid">部分掌握</span>' : '<span class="badge no">待巩固</span>';
       $$('[data-act="qa-grade"]', card).forEach((b) => {
         b.classList.toggle('primary', Number(b.dataset.g) === g);
       });
-      card.style.transition = 'box-shadow .4s';
-      card.style.boxShadow = g >= 2 ? '0 0 0 2px var(--green)' : g === 0 ? '0 0 0 2px var(--red)' : '0 0 0 2px var(--gold)';
-      setTimeout(() => { card.style.boxShadow = ''; }, 1400);
     }
     beep(g >= 2 ? 'ok' : 'no');
-    toast(g >= 2 ? '记下了！' : g === 1 ? '再补一补要点' : '别急，读一遍参考答案再来一次');
+    toast(g >= 2 ? '记下了' : g === 1 ? '再补一补要点' : '先看一遍参考答案，再自测一次');
   }
 
-
-  const CARD_INTERVAL = [0, 1, 3, 7, 15, 30]; // 天
+  /* ---------------- 视图：词义卡 ---------------- */
+  const CARD_INTERVAL = [0, 1, 3, 7, 15, 30];
   let deck = [];
   let deckPos = 0;
 
@@ -998,37 +882,30 @@
     const learned = Object.keys(S.card).length;
     return `
     <div class="view">
-      <div class="section-head">
-        <h1>词义<em>闪卡</em></h1>
-        <p>点卡片翻面看释义 · 记住点「记住了」，忘记点「没记住」——系统会按遗忘曲线安排复习</p>
-      </div>
+      ${pageHead('词义卡', '正面是词，背面是释义。记住点「记住了」，忘记点「没记住」，系统按遗忘曲线安排复习。')}
       <div class="flash-wrap">
         <div class="deck-info">
-          <span>本轮 ${deck.length} 张</span>
-          <span>·</span>
-          <span>已学 ${learned} / ${D.cards.length}</span>
-          <span>·</span>
-          <span id="card-pos">1 / ${deck.length}</span>
+          <span>本轮 ${deck.length} 张</span><span>已学 ${learned} / ${D.cards.length}</span><span id="card-pos">1 / ${deck.length}</span>
         </div>
         <div class="flash" id="flash">
           <div class="flash-inner">
-            <div class="face front" id="flash-front"></div>
+            <div class="face" id="flash-front"></div>
             <div class="face back" id="flash-back"></div>
           </div>
         </div>
-        <div class="flash-tip">点击卡片翻转 · 键盘 ← → 切换</div>
-        <div class="flash-actions">
-          <button class="btn" data-act="card-unknown">😵 没记住</button>
-          <button class="btn ghost" data-act="flip">↻ 翻面</button>
-          <button class="btn primary" data-act="card-known">😎 记住了</button>
+        <p class="muted" style="margin:0">点击卡片翻面，键盘 ← → 切换。</p>
+        <div class="toolbar" style="justify-content:center;margin:0">
+          <button class="btn" data-act="card-unknown">没记住</button>
+          <button class="btn ghost" data-act="flip">翻面</button>
+          <button class="btn primary" data-act="card-known">记住了</button>
         </div>
         <div class="row">
           <button class="btn sm ghost" data-act="card-prev">← 上一张</button>
           <button class="btn sm ghost" data-act="card-next">下一张 →</button>
         </div>
       </div>
-      <div class="sep"></div>
-      <div class="muted center">复习节奏：记住后间隔 1 → 3 → 7 → 15 → 30 天再出现；没记住的立刻回到本轮末尾。</div>
+      <div class="rule"></div>
+      <p class="muted">复习间隔：记住后 1、3、7、15、30 天再出现。没记住的立刻回到本轮末尾。</p>
     </div>`;
   }
 
@@ -1045,7 +922,7 @@
     $('#flash-back').innerHTML = `<div>
       <div class="def">${esc(c.d)}</div>
       <div class="ex">${esc(c.ex)}</div>
-      <div class="src">${esc(c.src)} · 熟练度 ${'●'.repeat(box)}${'○'.repeat(Math.max(0, 5 - box))}</div>
+      <div class="src">${esc(c.src)} · 熟练 ${'●'.repeat(box)}${'○'.repeat(Math.max(0, 5 - box))}</div>
     </div>`;
     $('#flash').classList.remove('flipped');
     const pos = $('#card-pos');
@@ -1075,15 +952,15 @@
     deckPos++;
     if (deckPos >= deck.length) {
       buildDeck();
-      toast('🎉 本轮过完啦，已按遗忘曲线重新排序');
+      toast('本轮过完，已按遗忘曲线重新排序');
     }
     const f = $('#flash');
-    f.style.transition = 'opacity .25s, transform .25s';
-    f.style.opacity = '0'; f.style.transform = 'translateY(10px)';
-    setTimeout(() => { renderCard(); f.style.opacity = '1'; f.style.transform = 'none'; }, 240);
+    f.style.transition = 'opacity .2s';
+    f.style.opacity = '0';
+    setTimeout(() => { renderCard(); f.style.opacity = '1'; }, 200);
   }
 
-  /* ---------------- 视图：随机闯关 ---------------- */
+  /* ---------------- 视图：随机练习 ---------------- */
   let quizState = null;
 
   function allQuestions() {
@@ -1091,7 +968,7 @@
     D.modules.forEach((m) => {
       m.practice.forEach((p, i) => {
         const item = Object.assign({}, p, { _id: 'quiz-' + m.id + '-' + i, type: p.type || 'choice' });
-        list.push({ item, moduleId: m.id, color: m.color, title: m.title });
+        list.push({ item, moduleId: m.id, title: m.title });
       });
     });
     return list;
@@ -1101,21 +978,13 @@
     if (!quizState) startQuiz();
     return `
     <div class="view">
-      <div class="section-head">
-        <h1>随机<em>闯关</em></h1>
-        <p>从七大考点的练习中随机抽取 10 题，边做边查漏补缺</p>
+      ${pageHead('随机练习', '从七个考点的练习里随机抽十道，做完看正确率。')}
+      <div class="row" style="justify-content:space-between;margin-bottom:14px">
+        <div class="muted" id="quiz-count"></div>
+        <button class="btn sm" data-act="quiz-restart">重新抽题</button>
       </div>
-      <div class="card">
-        <div class="row" style="justify-content:space-between;margin-bottom:14px">
-          <div class="counter" id="quiz-count"></div>
-          <button class="btn sm" data-act="quiz-restart">🔄 重新抽题</button>
-        </div>
-        <div class="score-bar" style="margin:0 0 18px">
-          <span style="font-size:12.5px;color:var(--ink-3)">进度</span>
-          <div class="bar"><i id="quiz-prog"></i></div>
-        </div>
-        <div id="quiz-box"></div>
-      </div>
+      <div class="bar" style="margin-bottom:20px"><i id="quiz-prog"></i></div>
+      <div id="quiz-box"></div>
     </div>`;
   }
 
@@ -1134,18 +1003,16 @@
     const total = quizState.items.length;
     if (quizState.idx >= total) {
       const pct = Math.round((quizState.score / total) * 100);
-      box.innerHTML = `<div class="center" style="padding:24px 0">
-        <div style="font-family:var(--font-serif);font-size:26px;letter-spacing:2px">
-          ${pct >= 90 ? '🏆 出神入化' : pct >= 70 ? '🎉 渐入佳境' : pct >= 50 ? '💪 还需巩固' : '📖 从头再读一遍吧'}
-        </div>
-        <div style="font-size:40px;font-family:var(--font-serif);margin:14px 0">${quizState.score} / ${total}</div>
-        <div class="muted">正确率 ${pct}%</div>
-        <div class="row" style="justify-content:center;margin-top:20px">
+      const label = pct >= 90 ? '基本全对' : pct >= 70 ? '大体掌握' : pct >= 50 ? '还需巩固' : '回到考点再读一遍';
+      box.innerHTML = `<div class="center" style="padding:20px 0">
+        <div style="font-family:var(--kai);font-size:22px;letter-spacing:2px">${label}</div>
+        <div style="font-size:34px;margin:12px 0 4px">${quizState.score} / ${total}</div>
+        <p class="muted">正确率 ${pct}%</p>
+        <div class="row" style="justify-content:center;margin-top:16px">
           <button class="btn primary" data-act="quiz-restart">再来一轮</button>
-          <a class="btn" href="#/progress">查看错题本</a>
+          <a class="btn" href="#/progress">看错题本</a>
         </div>
       </div>`;
-      if (pct >= 70) burst(window.innerWidth / 2, window.innerHeight / 2);
       $('#quiz-count').textContent = `已答 ${total} / ${total}`;
       $('#quiz-prog').style.width = '100%';
       return;
@@ -1155,40 +1022,36 @@
     registerQuestion(item);
     box.innerHTML = `
       <div class="row" style="margin-bottom:8px">
-        <span class="tag" style="color:${cur.color}">${esc(cur.title)}</span>
-        <span class="counter">第 ${quizState.idx + 1} / ${total} 题 · 答对 ${quizState.score}</span>
+        <span class="tag">${esc(cur.title)}</span>
+        <span class="muted">第 ${quizState.idx + 1} / ${total} 题 · 答对 ${quizState.score}</span>
       </div>
       ${questionHTML(item, 'q' + quizState.idx, quizState.idx + 1)}`;
-    const card = $('.q-card', box);
+    const card = $('.q', box);
     card.dataset.module = cur.moduleId;
+    card.style.borderTop = '0';
+    card.style.paddingTop = '0';
     bindQuestion(card);
     $('#quiz-count').textContent = `已答 ${quizState.idx} / ${total}`;
     $('#quiz-prog').style.width = Math.round((quizState.idx / total) * 100) + '%';
 
-    // 答完后自动出现「下一题」
     const watcher = setInterval(() => {
       if (!document.body.contains(card)) { clearInterval(watcher); return; }
       if (card.dataset.done && !$('#next-q')) {
         clearInterval(watcher);
-        const ok = checkWasRight(card);
-        if (ok) quizState.score++;
+        if (card.dataset.correct === '1') quizState.score++;
         quizState.done++;
         const btn = document.createElement('button');
         btn.id = 'next-q';
         btn.className = 'btn primary';
-        btn.style.marginTop = '10px';
-        btn.textContent = quizState.idx + 1 >= total ? '查看成绩 →' : '下一题 →';
+        btn.style.marginTop = '12px';
+        btn.textContent = quizState.idx + 1 >= total ? '看成绩 →' : '下一题 →';
         btn.addEventListener('click', () => { quizState.idx++; renderQuiz(); });
         card.appendChild(btn);
       }
     }, 120);
   }
 
-  function checkWasRight(card) {
-    return card.dataset.correct === '1';
-  }
-
-  /* ---------------- 视图：古诗文诵读 ---------------- */
+  /* ---------------- 视图：诵读 ---------------- */
   let poemId = D.poems[0].id;
   let poemVert = false;
 
@@ -1196,18 +1059,14 @@
     const p = D.poems.find((x) => x.id === poemId) || D.poems[0];
     return `
     <div class="view">
-      <div class="section-head">
-        <h1>古诗文<em>诵读</em></h1>
-        <p>逐句浮现 · 可切换竖排（古籍版式）· 点击「朗读」跟读，注释随手可查</p>
-      </div>
-      <div class="poem-list">
+      ${pageHead('诵读', '点「朗读」跟读，可切换竖排。注释与译文在下方。')}
+      <div class="poem-grid">
         ${D.poems.map((x) => `
-          <div class="poem-chip ${x.id === p.id ? 'on' : ''}" data-poem="${x.id}">
-            <b>${esc(x.title)}</b>
-            <small>〔${esc(x.dynasty)}〕${esc(x.author)} · ${x.type}</small>
+          <div class="poem-item ${x.id === p.id ? 'on' : ''}" data-poem="${x.id}">
+            ${esc(x.title)}<small>〔${esc(x.dynasty)}〕${esc(x.author)}</small>
           </div>`).join('')}
       </div>
-      <div class="poem-stage">
+      <div class="poem-sheet">
         <div class="poem-title">
           <h2>${esc(p.title)}</h2>
           <div>〔${esc(p.dynasty)}〕${esc(p.author)}</div>
@@ -1216,22 +1075,22 @@
           ${p.lines.map((l) => `<span class="poem-line">${esc(l)}</span>`).join('')}
         </div>
         <div class="poem-tools">
-          <button class="btn sm" data-act="speak-poem">🔊 朗读全文</button>
-          <button class="btn sm" data-act="speak-slow">🐢 慢速跟读</button>
-          <button class="btn sm" data-act="toggle-vert">${poemVert ? '横排' : '竖排'}版式</button>
-          <button class="btn sm" data-act="show-trans">白话译文</button>
+          <button class="btn sm" data-act="speak-poem">朗读全文</button>
+          <button class="btn sm" data-act="speak-slow">慢速</button>
+          <button class="btn sm" data-act="toggle-vert">${poemVert ? '横排' : '竖排'}</button>
+          <button class="btn sm" data-act="show-trans">译文</button>
         </div>
         ${p.notes && p.notes.length ? `<div class="notes">
-          ${p.notes.map(([w, d]) => `<div class="note"><b>${esc(w)}</b>${esc(d)}</div>`).join('')}
+          ${p.notes.map(([w, d]) => `<div class="note-item"><b>${esc(w)}</b>${esc(d)}</div>`).join('')}
         </div>` : ''}
-        ${p.trans ? `<div class="trans" id="trans" style="display:none"><b style="color:var(--blue)">白话译文　</b>${esc(p.trans)}</div>` : ''}
+        ${p.trans ? `<div class="trans" id="trans" style="display:none"><b>白话译文　</b>${esc(p.trans)}</div>` : ''}
       </div>
     </div>`;
   }
 
-  /* ---------------- 视图：背诵挑战 ---------------- */
+  /* ---------------- 视图：背诵 ---------------- */
   let reciteId = D.reciteIds[0];
-  let reciteMode = 0; // 0 = 挖空，1 = 默写
+  let reciteMode = 0;
   let reciteHideRatio = 0.35;
   let revealMap = new Set();
 
@@ -1239,51 +1098,44 @@
     const p = D.poems.find((x) => x.id === reciteId) || D.poems[0];
     return `
     <div class="view">
-      <div class="section-head">
-        <h1>背诵<em>挑战</em></h1>
-        <p>挖空模式点击填空格即可揭示；默写模式写完自动逐字比对</p>
-      </div>
-      <div class="poem-list">
+      ${pageHead('背诵', '挖空模式点空格揭示。默写模式写完自动逐字比对。')}
+      <div class="poem-grid">
         ${D.reciteIds.map((id) => {
           const x = D.poems.find((y) => y.id === id);
-          return `<div class="poem-chip ${x.id === p.id ? 'on' : ''}" data-recite="${x.id}">
-            <b>${esc(x.title)}</b><small>${esc(x.author)} · ${x.lines.length} 句</small></div>`;
+          return `<div class="poem-item ${x.id === p.id ? 'on' : ''}" data-recite="${x.id}">
+            ${esc(x.title)}<small>${esc(x.author)} · ${x.lines.length} 句</small></div>`;
         }).join('')}
       </div>
-      <div class="card">
-        <div class="row" style="justify-content:space-between;margin-bottom:16px">
-          <div class="row">
-            <button class="btn sm ${reciteMode === 0 ? 'primary' : ''}" data-act="mode-cloze">挖空背诵</button>
-            <button class="btn sm ${reciteMode === 1 ? 'primary' : ''}" data-act="mode-write">默写比对</button>
-          </div>
-          ${reciteMode === 0 ? `<div class="row">
-            <button class="btn sm ghost" data-act="ratio-20">少量挖空</button>
-            <button class="btn sm ghost" data-act="ratio-35">适中</button>
-            <button class="btn sm ghost" data-act="ratio-55">大量挖空</button>
-            <button class="btn sm ghost" data-act="reveal-all">全部揭示</button>
-          </div>` : `<div class="row">
-            <button class="btn sm ghost" data-act="speak-poem2">🔊 听一遍</button>
-          </div>`}
+      <div class="toolbar" style="justify-content:space-between">
+        <div class="row">
+          <button class="btn sm ${reciteMode === 0 ? 'primary' : 'ghost'}" data-act="mode-cloze">挖空背诵</button>
+          <button class="btn sm ${reciteMode === 1 ? 'primary' : 'ghost'}" data-act="mode-write">默写比对</button>
         </div>
-        <div id="recite-stage">${reciteMode === 0 ? clozeHTML(p) : writeHTML()}</div>
-        ${reciteMode === 1 ? transcriptHTML(p) : ''}
+        ${reciteMode === 0 ? `<div class="row">
+          <button class="btn sm ghost" data-act="ratio-20">少量</button>
+          <button class="btn sm ghost" data-act="ratio-35">适中</button>
+          <button class="btn sm ghost" data-act="ratio-55">大量</button>
+          <button class="btn sm ghost" data-act="reveal-all">全部揭示</button>
+        </div>` : `<button class="btn sm ghost" data-act="speak-poem2">听一遍</button>`}
       </div>
+      <div id="recite-stage">${reciteMode === 0 ? clozeHTML(p) : writeHTML()}</div>
+      ${reciteMode === 1 ? transcriptHTML(p) : ''}
     </div>`;
   }
 
   function clozeHTML(p) {
     revealMap = revealMap || new Set();
     return `<div class="recite-text" id="cloze">
-      ${p.lines.map((line) => `<div style="margin-bottom:10px">${
-        Array.from(line).map((ch, i) => {
-          const key = hash(line) + '_' + i;
-          const isPunct = /[，。！？；：、「」“”（）]/.test(ch);
-          const r = pseudoRand(hash(line) + i);
-          const shouldHide = !isPunct && r < reciteHideRatio;
-          if (!shouldHide || revealMap.has(key)) return `<span>${esc(ch)}</span>`;
-          return `<span class="blank" data-key="${key}" data-ch="${esc(ch)}">${esc(ch)}</span>`;
-        }).join('')
-      }</div>`).join('')}
+      ${p.lines.map((line) => `<div class="line">${
+      Array.from(line).map((ch, i) => {
+        const key = hash(line) + '_' + i;
+        const isPunct = /[，。！？；：、「」“”（）]/.test(ch);
+        const r = pseudoRand(hash(line) + i);
+        const shouldHide = !isPunct && r < reciteHideRatio;
+        if (!shouldHide || revealMap.has(key)) return `<span>${esc(ch)}</span>`;
+        return `<span class="blank" data-key="${key}">${esc(ch)}</span>`;
+      }).join('')
+    }</div>`).join('')}
     </div>`;
   }
 
@@ -1294,7 +1146,7 @@
   }
 
   function writeHTML() {
-    return `<textarea class="recite-input" id="write-input" placeholder="在这里默写全文（标点可省略），写完点下面的按钮比对…"></textarea>
+    return `<textarea class="recite-input" id="write-input" placeholder="在这里默写全文，标点可省略。写完后点下面的按钮比对。"></textarea>
       <div class="row" style="margin-top:12px">
         <button class="btn primary" data-act="compare">逐字比对</button>
         <button class="btn ghost" data-act="show-answer">看原文</button>
@@ -1303,11 +1155,10 @@
 
   function transcriptHTML(p) {
     return `<div class="trans" id="answer-text" style="display:none;margin-top:14px">
-      <b style="color:var(--blue)">原文　</b>${p.lines.map(esc).join('')}
+      <b>原文　</b>${p.lines.map(esc).join('')}
     </div>`;
   }
 
-  /* LCS 逐字比对 */
   function lcsDiff(target, input) {
     const a = Array.from(stripPunct(target));
     const b = Array.from(stripPunct(input));
@@ -1331,7 +1182,7 @@
     return out;
   }
 
-  /* ---------------- 视图：我的进度 ---------------- */
+  /* ---------------- 视图：记录 ---------------- */
   function viewProgress() {
     const totalCards = D.cards.length;
     const learned = Object.keys(S.card).length;
@@ -1341,85 +1192,68 @@
     const qaTotal = qaAll.length;
     const qaDone = qaAll.filter((q) => S.qa && S.qa[q.id]).length;
     const qaGood = qaAll.filter((q) => S.qa && S.qa[q.id] && S.qa[q.id].grade >= 2).length;
+
     return `
     <div class="view">
-      <div class="section-head">
-        <h1>我的<em>进度</em></h1>
-        <p>数据保存在本机浏览器（localStorage），换设备不会同步</p>
+      ${pageHead('记录', '数据保存在本机浏览器，换设备不会同步。')}
+
+      <div class="kpi-row">
+        <div class="kpi"><b>${S.stats.streak || 0}</b><span>连续天数</span></div>
+        <div class="kpi"><b>${totalQ}</b><span>累计作答</span></div>
+        <div class="kpi"><b>${S.stats.correct || 0}</b><span>答对</span></div>
+        <div class="kpi"><b>${S.stats.wrong || 0}</b><span>答错</span></div>
       </div>
 
-      <div class="stat-row">
-        <div class="stat"><div><b>${S.stats.streak || 0}</b><br><span>连续学习天数</span></div></div>
-        <div class="stat"><div><b>${S.stats.correct || 0}</b><br><span>累计答对</span></div></div>
-        <div class="stat"><div><b>${S.stats.wrong || 0}</b><br><span>累计答错</span></div></div>
-        <div class="stat"><div><b>${totalQ}</b><br><span>累计作答</span></div></div>
-      </div>
+      ${section('考点进度', `
+        <div class="list">
+          ${D.modules.map((m) => `
+            <div class="list-row" style="cursor:default">
+              <span class="li-no">${esc(m.num)}</span>
+              <span class="li-main">
+                <span class="li-title">${esc(m.title)}</span>
+                <div class="bar" style="margin-top:7px"><i data-w="${moduleScore(m.id)}"></i></div>
+              </span>
+              <span class="li-meta">${moduleScore(m.id)}%</span>
+            </div>`).join('')}
+        </div>`)}
 
-      <div class="card">
-        <h3 style="margin:0 0 16px;font-family:var(--font-serif);letter-spacing:2px">七大考点掌握度</h3>
-        <div class="rings">
-          ${D.modules.map((m) => {
-            const sc = moduleScore(m.id);
-            const r = 34, c = 2 * Math.PI * r;
-            return `<div class="ring-card">
-              <div class="ring">
-                <svg width="84" height="84" viewBox="0 0 84 84">
-                  <circle class="bgc" cx="42" cy="42" r="${r}"></circle>
-                  <circle class="fgc" cx="42" cy="42" r="${r}" stroke="${m.color}"
-                    stroke-dasharray="${c}" stroke-dashoffset="${c}" data-off="${c * (1 - sc / 100)}"></circle>
-                </svg>
-                <b>${sc}%</b>
-              </div>
-              <span>${esc(m.title)}</span>
-            </div>`;
-          }).join('')}
-        </div>
-      </div>
+      ${section('复习', `
+        <div class="list">
+          <a class="list-row" href="#/cards">
+            <span class="li-main"><span class="li-title">词义卡</span>
+              <span class="li-desc">已学 ${learned} / ${totalCards} 张，熟练 ${mastered} 张</span></span>
+            <span class="li-meta">${Math.round((mastered / Math.max(1, totalCards)) * 100)}%</span>
+          </a>
+          <a class="list-row" href="#/qa">
+            <span class="li-main"><span class="li-title">自测问答</span>
+              <span class="li-desc">已自测 ${qaDone} / ${qaTotal} 题，掌握 ${qaGood} 题</span></span>
+            <span class="li-meta">${Math.round((qaGood / Math.max(1, qaTotal)) * 100)}%</span>
+          </a>
+          <a class="list-row" href="#/slash">
+            <span class="li-main"><span class="li-title">断句练习</span>
+              <span class="li-desc">长句 ${(D.longDrills || []).length} 道，短句 ${D.slashDrills.length} 道</span></span>
+            <span class="li-meta">去练习 →</span>
+          </a>
+        </div>`)}
 
-      <div class="card" style="margin-top:16px">
-        <h3 style="margin:0 0 16px;font-family:var(--font-serif);letter-spacing:2px">闪卡记忆</h3>
-        <div class="row" style="justify-content:space-between">
-          <div class="muted">已学 <b style="color:var(--red)">${learned}</b> / ${totalCards} 张 · 熟练（≥3 级）<b style="color:var(--green)">${mastered}</b> 张</div>
-          <a class="btn sm" href="#/cards">继续复习</a>
+      ${section('错题本', S.wrong.length ? `<div class="row" style="justify-content:flex-end;margin-bottom:8px">
+          <button class="btn sm ghost" data-act="clear-wrong">清空</button>
         </div>
-        <div class="score-bar" style="margin-top:14px">
-          <div class="bar"><i style="width:${Math.round((mastered / Math.max(1, totalCards)) * 100)}%"></i></div>
-          <span class="muted">${Math.round((mastered / Math.max(1, totalCards)) * 100)}%</span>
-        </div>
-      </div>
+        ${S.wrong.slice(0, 20).map((w) => `
+          <div style="padding:10px 0;border-bottom:1px solid var(--line)">
+            <div style="font-size:14px">${esc(w.q)}</div>
+            <div class="muted" style="margin-top:3px">${esc(w.a)}${w.exp ? ' · ' + esc(w.exp) : ''}</div>
+          </div>`).join('')}`
+      : '<p class="muted">还没有错题。做错的题会自动收在这里。</p>', `最近 ${S.wrong.length} 条`)}
 
-      <div class="card" style="margin-top:16px">
-        <h3 style="margin:0 0 16px;font-family:var(--font-serif);letter-spacing:2px">自测问答</h3>
-        <div class="row" style="justify-content:space-between">
-          <div class="muted">已自测 <b style="color:var(--red)">${qaDone}</b> / ${qaTotal} 题 · 已掌握 <b style="color:var(--green)">${qaGood}</b> 题</div>
-          <a class="btn sm" href="#/qa">去自测</a>
-        </div>
-        <div class="score-bar" style="margin-top:14px">
-          <div class="bar"><i style="width:${Math.round((qaGood / Math.max(1, qaTotal)) * 100)}%"></i></div>
-          <span class="muted">${Math.round((qaGood / Math.max(1, qaTotal)) * 100)}%</span>
-        </div>
-      </div>
-
-      <div class="card" style="margin-top:16px">
-        <div class="row" style="justify-content:space-between;margin-bottom:14px">
-          <h3 style="margin:0;font-family:var(--font-serif);letter-spacing:2px">错题本（最近 ${S.wrong.length} 条）</h3>
-          ${S.wrong.length ? '<button class="btn sm ghost" data-act="clear-wrong">清空</button>' : ''}
-        </div>
-        ${S.wrong.length ? S.wrong.slice(0, 20).map((w) => `
-          <div style="padding:12px 0;border-bottom:1px solid var(--line-2)">
-            <div style="font-family:var(--font-serif);font-size:14.5px">${esc(w.q)}</div>
-            <div class="muted" style="margin-top:4px">✔ ${esc(w.a)}${w.exp ? ' · ' + esc(w.exp) : ''}</div>
-          </div>`).join('') : '<div class="muted">还没有错题。去<a href="#/quiz" style="color:var(--red)">随机闯关</a>试试吧。</div>'}
-      </div>
-
-      <div class="row" style="justify-content:center;margin-top:26px">
+      <div class="row" style="justify-content:center;margin-top:24px">
         <button class="btn ghost" data-act="export">导出学习数据</button>
-        <button class="btn ghost" data-act="reset">重置全部进度</button>
+        <button class="btn ghost" data-act="reset">重置进度</button>
       </div>
     </div>`;
   }
 
-  /* ---------------- 渲染与事件 ---------------- */
+  /* ---------------- 渲染 ---------------- */
   const app = $('#main');
 
   function render() {
@@ -1428,12 +1262,12 @@
     const changed = key !== currentRoute;
     currentRoute = key;
 
-    window.speechSynthesis && window.speechSynthesis.cancel();
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
 
     let html = '';
     switch (r.view) {
       case 'home': html = viewHome(); break;
-      case 'modules': html = viewModules(); break;
+      case 'path': html = viewPath(); break;
       case 'module': html = viewModule(r.id); break;
       case 'slash': html = viewSlash(); break;
       case 'qa': html = viewQA(); break;
@@ -1445,30 +1279,46 @@
       default: html = viewHome();
     }
     app.innerHTML = html;
-    setNav(r.view);
+    setNav(r);
     if (changed) window.scrollTo({ top: 0, behavior: 'auto' });
 
-    // 页面级初始化
+    // 记住上一次的位置，供首页「续」使用
+    if (r.view !== 'home') {
+      const labelMap = {
+        path: '学习路径', slash: '断句练习', qa: '自测问答', cards: '词义卡',
+        quiz: '随机练习', poems: '诵读', recite: '背诵', progress: '记录'
+      };
+      let label = labelMap[r.view];
+      if (r.view === 'module') {
+        const m = D.modules.find((x) => x.id === r.id);
+        label = m ? m.title : '考点';
+      }
+      if (label) {
+        S.last = { hash: location.hash, label };
+        save();
+      }
+    }
+
     observeReveal(app);
-    initTilt();
-    app.querySelectorAll('.mod-card .bar i').forEach((i) => {
+
+    app.querySelectorAll('.list-row .bar i, .bar > i[data-w]').forEach((i) => {
       const w = i.dataset.w || 0;
-      requestAnimationFrame(() => setTimeout(() => { i.style.width = w + '%'; }, 120));
+      requestAnimationFrame(() => setTimeout(() => { i.style.width = w + '%'; }, 80));
     });
 
     if (r.view === 'module') {
       bindPractice(r.id);
       const f = $('#formula');
       if (f) {
-        const parts = $$('.part', f);
-        setTimeout(() => parts.forEach((p, i) => setTimeout(() => p.classList.add('lit'), i * 220)), 260);
+        const parts = $$('.fpart', f);
+        setTimeout(() => parts.forEach((p, i) => setTimeout(() => p.classList.add('lit'), i * 160)), 200);
       }
       const mn = $('#mnemo');
       if (mn) mn.addEventListener('click', () => { mn.classList.toggle('flipped'); beep('tick'); });
-      $$('.kitem-head').forEach((h) => h.addEventListener('click', () => h.parentElement.classList.toggle('open')));
+      $$('.acc-head').forEach((h) => h.addEventListener('click', () => h.parentElement.classList.toggle('open')));
     }
 
-    if (r.view === 'slash') { drillOrder.length || (drillOrder = D.slashDrills.map((_, i) => i)); renderDrill(); }
+    if (r.view === 'slash') { renderDrill(); }
     if (r.view === 'cards') {
       if (!deck.length) buildDeck();
       renderCard();
@@ -1477,31 +1327,6 @@
     }
     if (r.view === 'quiz') { renderQuiz(); }
     if (r.view === 'recite') { bindRecite(); }
-    if (r.view === 'progress') {
-      requestAnimationFrame(() => {
-        setTimeout(() => {
-          $$('.ring .fgc').forEach((c) => { c.style.strokeDashoffset = c.dataset.off; });
-        }, 200);
-      });
-    }
-  }
-
-  function initTilt() {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    $$('.tilt').forEach((el) => {
-      el.addEventListener('mousemove', (e) => {
-        const r = el.getBoundingClientRect();
-        const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
-        el.style.setProperty('--mx', (x * 100) + '%');
-        el.style.setProperty('--my', (y * 100) + '%');
-        el.style.transform = `perspective(800px) rotateX(${(0.5 - y) * 7}deg) rotateY(${(x - 0.5) * 9}deg) translateY(-4px)`;
-      });
-      el.addEventListener('mouseleave', () => { el.style.transform = ''; });
-      el.addEventListener('click', () => {
-        const href = el.dataset.href;
-        if (href) location.hash = href;
-      });
-    });
   }
 
   /* 背诵交互 */
@@ -1518,27 +1343,27 @@
     if (cmp) {
       cmp.addEventListener('click', () => {
         const val = $('#write-input').value;
-        if (!stripPunct(val).length) { toast('先写点内容再比对～'); return; }
+        if (!stripPunct(val).length) { toast('先写点内容再比对'); return; }
         const target = p.lines.join('');
         const diff = lcsDiff(target, val);
         const total = Array.from(stripPunct(target)).length;
         const okCount = diff.filter((d) => d.t === 'ok').length;
         const pct = Math.round((okCount / Math.max(1, total)) * 100);
-        let out = '<div class="card" style="margin-top:16px"><h3 style="margin:0 0 10px;font-family:var(--font-serif)">比对结果 · 正确率 ' + pct + '%</h3>';
+        let out = `<div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--rule)">
+          <div class="muted" style="margin-bottom:8px">逐字比对 · 正确率 ${pct}%</div>`;
         out += '<div class="diff">' + diff.map((d) => {
           if (d.t === 'ok') return `<span class="ok">${esc(d.c)}</span>`;
           if (d.t === 'bad') return `<span class="bad">${esc(d.c)}</span>`;
           return `<span class="skip">${esc(d.c)}</span>`;
         }).join('') + '</div>';
-        out += '<div class="muted" style="margin-top:10px">绿色为正确；<span style="color:var(--red)">红色</span>为你写错或漏写的字；<span style="text-decoration:line-through">删除线</span>为多写的字。</div></div>';
+        out += '<p class="muted" style="margin-top:8px">绿色为正确，红色为写错或漏写，删除线为多写。</p></div>';
         const old = $('#diff-box');
         if (old) old.remove();
         const box = document.createElement('div');
         box.id = 'diff-box';
         box.innerHTML = out;
         $('#recite-stage').after(box);
-        if (pct >= 90) { burst(window.innerWidth / 2, 200); beep('ok'); toast('太棒了！'); }
-        else beep('no');
+        if (pct >= 90) { beep('ok'); toast('正确率不错'); } else beep('no');
       });
     }
   }
@@ -1549,11 +1374,11 @@
     if (!t) return;
     const act = t.dataset.act;
 
-    // 通用朗读
     if (act === 'speak' || act === 'speak-drill' || act === 'speak-poem' || act === 'speak-poem2') {
       let text = t.dataset.text;
       if (act === 'speak-drill') {
-        const item = questionRegistry.get($('#drill-box .q-card').dataset.q);
+        const node = $('#drill-box .q');
+        const item = node ? questionRegistry.get(node.dataset.q) : null;
         text = item ? item.marked.replace(/\//g, '，') : '';
       }
       if (act === 'speak-poem' || act === 'speak-poem2') {
@@ -1573,23 +1398,21 @@
     if (act === 'toggle-vert') { poemVert = !poemVert; render(); return; }
     if (act === 'show-trans') {
       const tr = $('#trans');
-      if (tr) { tr.style.display = tr.style.display === 'none' ? 'block' : 'none'; tr.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+      if (tr) {
+        tr.style.display = tr.style.display === 'none' ? 'block' : 'none';
+        tr.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
       return;
     }
 
-    // 断句工坊
     if (act === 'mode-long') { drillMode = 'long'; resetDrillOrder(); render(); return; }
     if (act === 'mode-short') { drillMode = 'short'; resetDrillOrder(); render(); return; }
     if (act === 'show-trans-drill') {
-      const t = $('#drill-trans');
-      if (t) { t.hidden = !t.hidden; t.classList.toggle('show', !t.hidden); }
+      const p = $('#drill-trans');
+      if (p) p.hidden = !p.hidden;
       return;
     }
-    if (act === 'next-drill') {
-      drillIdx = (drillIdx + 1) % drillOrder.length;
-      renderDrill();
-      return;
-    }
+    if (act === 'next-drill') { drillIdx = (drillIdx + 1) % drillOrder.length; renderDrill(); return; }
     if (act === 'shuffle') {
       for (let i = drillOrder.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -1598,17 +1421,14 @@
       drillIdx = 0; renderDrill(); toast('题库已打乱'); return;
     }
 
-    // 闪卡
     if (act === 'flip') { $('#flash').classList.toggle('flipped'); beep('tick'); return; }
     if (act === 'card-known') { cardAnswer(true); return; }
     if (act === 'card-unknown') { cardAnswer(false); return; }
     if (act === 'card-next') { deckPos = (deckPos + 1) % Math.max(1, deck.length); renderCard(); return; }
     if (act === 'card-prev') { deckPos = (deckPos - 1 + deck.length) % Math.max(1, deck.length); renderCard(); return; }
 
-    // 闯关
     if (act === 'quiz-restart') { startQuiz(); render(); return; }
 
-    // 自测问答
     if (act === 'qa-reveal') { qaReveal(t.dataset.id); return; }
     if (act === 'qa-grade') { qaGrade(t.dataset.id, Number(t.dataset.g)); return; }
     if (act === 'qa-clear') {
@@ -1617,7 +1437,7 @@
       if (card) $('.qa-input', card).value = '';
       if (S.qa && S.qa[id]) { delete S.qa[id]; save(); }
       render();
-      toast('已清空，可重新作答');
+      toast('已清空');
       return;
     }
     if (act === 'qa-filter') { qaFilter = t.dataset.f; render(); return; }
@@ -1631,14 +1451,13 @@
       const el = document.getElementById('qa-' + pick.id);
       if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        el.style.boxShadow = '0 0 0 2px var(--red)';
-        setTimeout(() => { el.style.boxShadow = ''; }, 1800);
+        el.style.outline = '2px solid var(--zhu)';
+        setTimeout(() => { el.style.outline = ''; }, 1600);
         $('.qa-input', el).focus();
       }
       return;
     }
 
-    // 背诵
     if (act === 'mode-cloze') { reciteMode = 0; revealMap = new Set(); render(); return; }
     if (act === 'mode-write') { reciteMode = 1; render(); return; }
     if (act === 'ratio-20') { reciteHideRatio = 0.2; render(); return; }
@@ -1651,13 +1470,12 @@
       return;
     }
 
-    // 进度
     if (act === 'clear-wrong') {
-      if (confirm('确定清空错题本吗？')) { S.wrong = []; save(); render(); }
+      if (confirm('确定清空错题本？')) { S.wrong = []; save(); render(); }
       return;
     }
     if (act === 'reset') {
-      if (confirm('将清空所有学习进度（考点、闪卡、错题），确定吗？')) {
+      if (confirm('将清空所有学习进度（考点、词卡、错题），确定？')) {
         const theme = S.settings.theme, sound = S.settings.sound;
         S = blankState();
         S.settings = { theme, sound };
@@ -1671,12 +1489,12 @@
       a.href = URL.createObjectURL(blob);
       a.download = '古文古诗学习数据.json';
       a.click();
-      toast('已导出 JSON');
+      toast('已导出');
       return;
     }
   });
 
-  /* 诗词/背诵选择器 */
+  /* 诗文/背诵选择器 */
   document.addEventListener('click', (e) => {
     const pc = e.target.closest('[data-poem]');
     if (pc) { poemId = pc.dataset.poem; render(); return; }
@@ -1686,7 +1504,11 @@
 
   /* 键盘 */
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { window.speechSynthesis && window.speechSynthesis.cancel(); return; }
+    if (e.key === 'Escape') {
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
+      closeMenu();
+      return;
+    }
     if (!$('#flash')) return;
     if (e.key === 'ArrowRight') { $('#flash').classList.contains('flipped') ? cardAnswer(true) : $('#flash').classList.toggle('flipped'); }
     if (e.key === 'ArrowLeft') { $('#flash').classList.toggle('flipped'); }
@@ -1696,41 +1518,43 @@
   /* 主题 / 音效 */
   function applySettings() {
     document.documentElement.dataset.theme = S.settings.theme || 'light';
-    $('#btnTheme').textContent = (S.settings.theme === 'dark') ? '☀' : '☾';
+    const dark = S.settings.theme === 'dark';
+    $('#btnTheme').textContent = dark ? '日' : '夜';
+    $('#btnTheme').setAttribute('aria-label', dark ? '切换到日间模式' : '切换到夜间模式');
     $('#btnSound').classList.toggle('off', !S.settings.sound);
-    $('#btnSound').textContent = S.settings.sound ? '🔊' : '🔇';
+    $('#btnSound').textContent = S.settings.sound ? '音' : '静';
     const mt = document.getElementById('metaTheme');
-    if (mt) mt.setAttribute('content', S.settings.theme === 'dark' ? '#14171b' : '#f6f1e7');
+    if (mt) mt.setAttribute('content', dark ? '#14130f' : '#f3eee2');
   }
 
-  /* 移动端导航菜单 */
+  /* 手机目录 */
   function closeMenu() {
-    const nav = $('#nav'), btn = $('#btnMenu');
-    if (!nav || !nav.classList.contains('open')) return;
-    nav.classList.remove('open');
-    if (btn) { btn.textContent = '☰'; btn.setAttribute('aria-expanded', 'false'); }
+    const side = $('#side'), btn = $('#btnMenu'), shell = $('.shell');
+    if (!side || !side.classList.contains('open')) return;
+    side.classList.remove('open');
+    if (shell) shell.classList.remove('menu-open');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
   }
 
   function boot() {
     load();
     applySettings();
-    initPetals();
-
-    // 导航
-    $('#nav').innerHTML = NAV.map(([h, t]) => `<a href="${h}">${t}</a>`).join('');
+    renderTOC();
 
     const btnMenu = $('#btnMenu');
     if (btnMenu) {
       btnMenu.addEventListener('click', (e) => {
         e.stopPropagation();
-        const nav = $('#nav');
-        const open = nav.classList.toggle('open');
-        btnMenu.textContent = open ? '✕' : '☰';
+        const open = $('#side').classList.toggle('open');
+        $('.shell').classList.toggle('menu-open', open);
         btnMenu.setAttribute('aria-expanded', open ? 'true' : 'false');
       });
       $('#nav').addEventListener('click', (e) => { if (e.target.closest('a')) closeMenu(); });
-      document.addEventListener('click', (e) => { if (!e.target.closest('.topbar')) closeMenu(); });
-      window.addEventListener('resize', () => { if (window.innerWidth > 760) closeMenu(); });
+      const scrim = $('#scrim');
+      if (scrim) scrim.addEventListener('click', closeMenu);
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('.side') && !e.target.closest('#btnMenu')) closeMenu();
+      });
     }
 
     $('#btnTheme').addEventListener('click', () => {
@@ -1742,7 +1566,6 @@
       save(); applySettings();
       if (S.settings.sound) beep('tick');
     });
-    $('.brand').addEventListener('click', () => { location.hash = '#/home'; closeMenu(); });
 
     window.addEventListener('hashchange', () => { closeMenu(); render(); });
     if (!location.hash) location.hash = '#/home';
